@@ -1,0 +1,5 @@
+.env
+global-bundle.pem
+venv/
+__pycache__/
+*.pyc

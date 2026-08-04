@@ -97,6 +97,74 @@ Para facilitar o desenvolvimento, o projeto está configurado para rodar com Doc
     docker-compose down
     ```
 
+## 🚀 Como Executar na EC2 sem Docker
+
+Se você for rodar a aplicação diretamente em uma instância EC2, não é necessário usar Docker ou Docker Compose.
+
+1.  **Clone o repositório na EC2** e entre na pasta do projeto:
+    ```bash
+    git clone <url-do-seu-repositorio>
+    cd toggle-master-monolith
+    ```
+
+2.  **Crie e ative um ambiente virtual Python:**
+    ```bash
+    python3 -m venv venv
+    source venv/bin/activate
+    ```
+
+3.  **Instale as dependências:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+4.  **Defina as variáveis de ambiente no EC2** (não coloque credenciais no Git):
+    ```bash
+    export SECRET_NAME=nome/rds/secrets
+    export AWS_REGION=xx-xxxx-1
+    export USE_SECRETS_MANAGER=true
+    ```
+
+5.  **Execute a aplicação:**
+    ```bash
+    python3 app.py
+    ```
+
+6.  **Acesse a aplicação:**
+    Abra `http://<ip-publico-da-ec2>:5000/health` no navegador ou use `curl`.
+
+> Nota: No EC2, você também pode usar `gunicorn --bind 0.0.0.0:5000 app:app` se quiser rodar a aplicação em modo de produção.
+
+### Segurança importante
+- O `.env` deve conter apenas valores de configuração e não deve ser commitado no Git.
+- Não coloque chaves secretas, senhas ou credenciais sensíveis no repositório.
+- Use IAM Role da instância EC2 com permissão `secretsmanager:GetSecretValue`.
+
+### Variáveis de ambiente recomendadas no EC2
+- `SECRET_NAME`
+- `AWS_REGION`
+- `USE_SECRETS_MANAGER=true`
+- `DB_HOST` e `DB_PORT` são necessários apenas se você estiver usando um script de inicialização que checa a disponibilidade do banco.
+
+### Exemplo de `.env` (sem valores reais)
+```env
+SECRET_NAME=prd/rds/togglemaster
+AWS_REGION=sa-east-1
+USE_SECRETS_MANAGER=true
+DB_HOST=<seu-db-host>
+DB_PORT=5432
+DB_NAME=<seu-db-name>
+DB_USER=<seu-db-user>
+DB_PASSWORD=<seu-db-password>
+```
+
+> Este arquivo não deve ser commitado. Use valores reais apenas localmente ou em EC2 com variáveis de ambiente configuradas no servidor.
+
+### Exemplo de `curl` para verificar
+```bash
+curl http://localhost:5000/health
+```
+
 ### Endpoints da API
 
 Você pode usar o Postman ou `curl` para interagir com a API rodando localmente (`http://localhost:5000`) ou na sua instância EC2 (`http://<ip-publico-ec2>:5000`).
@@ -298,5 +366,32 @@ Você deve entregar os seguintes itens:
 - **⚠️ SEGURANÇA:** Nunca, jamais, suba suas chaves de acesso da AWS para o seu repositório Git.
 - **💸 CUSTOS:** Fique atento aos recursos que você cria na AWS. Utilize o *AWS Academy* ou *Free Tier* sempre que possível e **lembre-se de desligar ou remover os recursos** após a avaliação do desafio.
 - **📝 DOCUMENTAÇÃO:** Uma boa documentação é parte crucial da cultura DevOps. Descreva suas escolhas e justifique-as.
+
+## 🔐 Configuração de secrets e arquivos sensíveis
+
+Siga estas instruções para manter suas credenciais seguras e garantir que a aplicação consiga ler os valores necessários em produção (EC2) ou localmente.
+
+- **Sempre mantenha um `.env` gitignored** com valores de configuração locais e evite commitar qualquer segredo. Exemplo mínimo (.env):
+
+```env
+SECRET_NAME=your/secretsmanager/name
+AWS_REGION=your-aws-region
+USE_SECRETS_MANAGER=true
+DB_NAME=your_database_name   # somente se o secret não contiver `dbname`
+```
+
+- **Obrigatório em execução na EC2**: defina `SECRET_NAME` e `AWS_REGION` (ou atribua uma IAM Role à instância com `secretsmanager:GetSecretValue`).
+- **DB_NAME:** prefira que o Secret contenha `dbname` ou `database`. Se não contiver, defina `DB_NAME` no `.env`/ambiente; não assumimos um fallback automático.
+- **global-bundle.pem / chaves PEM:** adicione qualquer bundle de chave privada (por exemplo `global-bundle.pem`) ao `.gitignore`. Se o arquivo já foi comitado, remova-o do índice e faça um commit:
+
+```bash
+git rm --cached global-bundle.pem
+git commit -m "remove global-bundle.pem (sensitive)"
+git push
+```
+
+- **Se a chave foi exposta publicamente**, trate como comprometida: revogue/regenere a chave, atualize/rotacione credenciais e, se necessário, purgue o histórico Git (BFG ou `git filter-repo`) antes de forçar push — este passo é disruptivo e requer coordenação com a equipe.
+
+Essas práticas preservam segurança e evitam vazamentos acidentais de credenciais.
 
 Boa sorte!
