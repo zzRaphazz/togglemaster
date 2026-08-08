@@ -28,13 +28,13 @@ set -euo pipefail
 # ============================================================
 # CONFIGURATION - EDIT THESE VALUES BEFORE USING
 # ============================================================
-GIT_REPO_URL="https://github.com/zzRaphazz/togglemaster.git"   # <<< CHANGE ME
+GIT_REPO_URL="https://github.com/zzRaphazz/togglemaster.git"  
 APP_DIR="/opt/togglemaster"
 APP_USER="togglemaster"
-SECRET_NAME="prd/rds/togglemaster"   # <<< CHANGE ME (name of your Secrets Manager secret)
-AWS_REGION="sa-east-1"               # <<< CHANGE ME (region where your Secrets Manager secret lives)
+SECRET_NAME="rds/aws/togglesmaster"   
+AWS_REGION="us-east-1"               
 USE_SECRETS_MANAGER="true"
-DB_NAME=""                           # <<< OPTIONAL: set only if secret does NOT contain dbname/database
+DB_NAME=""                           
 GUNICORN_WORKERS=2
 GUNICORN_BIND="0.0.0.0:5000"
 LOG_DIR="/var/log/togglemaster"
