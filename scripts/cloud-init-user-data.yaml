@@ -1,0 +1,213 @@
+#cloud-config
+# ============================================================
+# Cloud-Init User-Data — ToggleMaster EC2
+# ============================================================
+# ANTES DE USAR — PASSOS OBRIGATORIOS:
+# 1. Na secao "ENVIRONMENT VARIABLES" abaixo, preencha os valores:
+#       DB_HOST     = endpoint do RDS
+#       DB_NAME     = nome do banco
+#       DB_USER     = usuario do banco
+#       DB_PASSWORD = senha do banco
+#    (DB_PORT ja esta com default 5432)
+# 2. Cole TODO este arquivo no campo "User data" da instancia EC2
+#    (secao Advanced details)
+# 3. Security Group da EC2: liberar portas 22 (SSH) e 5000 (app)
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - git
+  - python3
+  - python3-pip
+  - python3-venv
+
+users:
+  - name: togglemaster
+    gecos: ToggleMaster Application User
+    shell: /usr/sbin/nologin
+    system: true
+    create_home: false
+    lock_passwd: true
+
+# ============================================================
+#  ENVIRONMENT VARIABLES — EDITE AQUI ANTES DE LAUNCHAR
+# ============================================================
+write_files:
+  - path: /etc/togglemaster/togglemaster.env
+    permissions: "0640"
+    owner: "0:0"
+    defer: true
+    content: |
+      DB_HOST=COLOQUE-AQUI-O-ENDPOINT-DO-RDS
+      DB_PORT=5432
+      DB_NAME=COLOQUE-O-NOME-DO-BANCO
+      DB_USER=COLOQUE-O-USUARIO-DO-BANCO
+      DB_PASSWORD=COLOQUE-A-SENHA-DO-BANCO
+
+  - path: /usr/local/bin/togglemaster-fix-req.py
+    permissions: "0755"
+    owner: "0:0"
+    content: |
+      import re, os, sys
+      app_dir = os.environ.get("APP_DIR", "/opt/togglemaster")
+      path = os.path.join(app_dir, "requirements.txt")
+      if not os.path.exists(path):
+          with open(path, "w") as f:
+              f.write("Flask>=3.0\nWerkzeug>=3.0\npsycopg2-binary>=2.9\nboto3\ngunicorn>=21.0\npython-dotenv\n")
+          sys.exit(0)
+      with open(path) as f:
+          content = f.read()
+      fixed = []
+      for line in content.splitlines():
+          s = line.strip()
+          if not s:
+              continue
+          matches = list(re.finditer(r'([A-Za-z0-9_.\-]+(?:==[A-Za-z0-9_.\-]+)?)', s))
+          if len(matches) > 1:
+              for m in matches:
+                  fixed.append(m.group(1))
+          else:
+              fixed.append(s)
+      if not any(re.match(r'^python-dotenv\b', l) for l in fixed):
+          fixed.append("python-dotenv")
+      if not any(l.lower().startswith("boto3") for l in fixed):
+          fixed.append("boto3")
+      new = "\n".join(fixed) + "\n"
+      if new != content:
+          with open(path, "w") as f:
+              f.write(new)
+          print("requirements.txt ajustado.")
+      else:
+          print("requirements.txt ok.")
+
+  - path: /usr/local/bin/togglemaster-wait-db.py
+    permissions: "0755"
+    owner: "0:0"
+    content: |
+      import os, socket, time, sys
+      host = os.environ.get("DB_HOST")
+      if not host or host.startswith("COLOQUE"):
+          sys.exit(0)
+      port = int(os.environ.get("DB_PORT", "5432"))
+      deadline = time.time() + 120
+      while time.time() < deadline:
+          try:
+              with socket.create_connection((host, port), timeout=3):
+                  sys.exit(0)
+          except Exception:
+              time.sleep(2)
+      sys.exit(0)
+
+  - path: /usr/local/bin/togglemaster-init-db.py
+    permissions: "0755"
+    owner: "0:0"
+    content: |
+      import sys, os
+      app_dir = os.environ.get("APP_DIR", "/opt/togglemaster")
+      sys.path.insert(0, app_dir)
+      try:
+          from app import init_db
+          init_db()
+      except Exception as e:
+          sys.stderr.write("init_db warning: %s\n" % e)
+
+  - path: /etc/systemd/system/togglemaster.service
+    permissions: "0644"
+    owner: "0:0"
+    defer: true
+    content: |
+      [Unit]
+      Description=ToggleMaster Flask Application
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      User=__APP_USER__
+      Group=__APP_USER__
+      WorkingDirectory=__APP_DIR__
+      EnvironmentFile=/etc/togglemaster/togglemaster.env
+      Environment=APP_DIR=__APP_DIR__
+
+      ExecStartPre=__VENV_DIR__/bin/python /usr/local/bin/togglemaster-wait-db.py
+      ExecStartPre=__VENV_DIR__/bin/python /usr/local/bin/togglemaster-init-db.py
+      ExecStart=__VENV_DIR__/bin/python __APP_DIR__/app.py
+      StandardOutput=append:__LOG_DIR__/app.log
+      StandardError=append:__LOG_DIR__/app.log
+      SyslogIdentifier=togglemaster
+      Restart=always
+      RestartSec=5
+      StartLimitIntervalSec=60
+      StartLimitBurst=5
+
+      NoNewPrivileges=true
+      PrivateTmp=true
+      ProtectSystem=strict
+      ProtectHome=true
+      ReadWritePaths=__APP_DIR__ __LOG_DIR__ /tmp /usr/local/bin
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - |
+    set -eu
+    echo "[1/6] Atualizando pip global..."
+    python3 -m pip install --upgrade pip || true
+    APP_DIR=/opt/togglemaster
+    APP_USER=togglemaster
+    VENV_DIR="${APP_DIR}/venv"
+    LOG_DIR=/var/log/togglemaster
+    REPO_URL="https://github.com/zzRaphazz/togglemaster.git"
+
+    echo "[2/6] Clonando / atualizando repositorio..."
+    if [ ! -d "${APP_DIR}/.git" ]; then
+      git clone "${REPO_URL}" "${APP_DIR}"
+    else
+      cd "${APP_DIR}"
+      git pull --ff-only || git pull || true
+    fi
+
+    echo "[3/6] Garantindo python3-venv disponivel..."
+    apt-get install -y python3-venv 2>/dev/null || dnf install -y python3-venv 2>/dev/null || true
+
+    echo "[4/6] Criando virtualenv..."
+    if [ ! -d "${VENV_DIR}" ]; then
+      python3 -m venv "${VENV_DIR}"
+    fi
+    "${VENV_DIR}/bin/python" -m pip install --upgrade pip setuptools wheel
+
+    echo "[4/6] Ajustando e instalando requirements.txt..."
+    APP_DIR="${APP_DIR}" "${VENV_DIR}/bin/python" /usr/local/bin/togglemaster-fix-req.py
+    "${VENV_DIR}/bin/pip" install --no-cache-dir -r "${APP_DIR}/requirements.txt"
+
+    echo "[5/6] Ajustando ownership e permissoes..."
+    mkdir -p "${LOG_DIR}"
+    chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}" "${LOG_DIR}"
+    chmod 755 "${APP_DIR}" && chmod 750 "${LOG_DIR}"
+    find "${VENV_DIR}" -type d -exec chmod 755 {} \; 2>/dev/null || true
+
+    chown root:togglemaster /etc/togglemaster/togglemaster.env 2>/dev/null || \
+      { mkdir -p /etc/togglemaster && chown root:togglemaster /etc/togglemaster/togglemaster.env; }
+    chmod 640 /etc/togglemaster/togglemaster.env
+
+    echo "[6/6] Finalizando servico systemd..."
+    sed -i \
+      -e "s|__APP_DIR__|${APP_DIR}|g" \
+      -e "s|__APP_USER__|${APP_USER}|g" \
+      -e "s|__VENV_DIR__|${VENV_DIR}|g" \
+      -e "s|__LOG_DIR__|${LOG_DIR}|g" \
+      /etc/systemd/system/togglemaster.service
+
+    systemctl daemon-reload
+    systemctl enable togglemaster.service
+    systemctl restart togglemaster.service
+
+    echo "=== Bootstrap finalizado ==="
+    systemctl --no-pager status togglemaster.service || true
+    echo "Logs:  sudo journalctl -u togglemaster -f  |  sudo tail -f ${LOG_DIR}/app.log"
+    echo "Envs:  sudo cat /etc/togglemaster/togglemaster.env"
+    echo "Teste: curl -s http://localhost:5000/health"
+
+final_message: "ToggleMaster instance bootstrap finished."
