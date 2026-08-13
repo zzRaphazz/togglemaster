@@ -10,96 +10,22 @@ load_dotenv()
 
 app = Flask(__name__)
 
-def get_db_secret():
-    # Require secret name and region from environment (no sensible defaults here)
-    SECRET_NAME = os.getenv("SECRET_NAME")
-    REGION_NAME = os.getenv("AWS_REGION")
-
-    if not SECRET_NAME or not REGION_NAME:
-        raise RuntimeError(
-            "Missing SECRET_NAME or AWS_REGION environment variables.\n"
-            "Set them in your local .env (gitignored) or in the environment before starting the app.\n"
-            "Example .env entries:\n"
-            "SECRET_NAME=env/rds/secrets\n"
-            "AWS_REGION=virginia-1\n"
-        )
-
-    client = boto3.client("secretsmanager", region_name=REGION_NAME)
-    response = client.get_secret_value(SecretId=SECRET_NAME)
-
-    if "SecretString" in response:
-        return json.loads(response["SecretString"])
-    if "SecretBinary" in response:
-        return json.loads(response["SecretBinary"].decode("utf-8"))
-
-    raise RuntimeError("Secret Manager retornou um valor inesperado sem SecretString ou SecretBinary")
-
-
-def get_db_config():
-    use_secrets = os.getenv("USE_SECRETS_MANAGER", "true").lower() in ("1", "true", "yes")
-    secret = {}
-
-    if use_secrets:
-        try:
-            secret = get_db_secret()
-        except Exception as e:
-            print(f"Aviso: não foi possível carregar secret do Secrets Manager: {e}")
-            print("Tentando usar variáveis de ambiente em vez do Secrets Manager...")
-            secret = {}
-
-    db_config = {
-        "host": secret.get("host") or secret.get("hostname") or os.getenv("DB_HOST"),
-        "port": secret.get("port") or secret.get("PORT") or os.getenv("DB_PORT") or 5432,
-        "database": (
-            secret.get("dbname")
-            or secret.get("database")
-            or os.getenv("DB_NAME")
-            or secret.get("dbInstanceIdentifier")
-        ),
-        "user": secret.get("username") or secret.get("user") or os.getenv("DB_USER"),
-        "password": secret.get("password") or os.getenv("DB_PASSWORD"),
-    }
-
-    # Avisos sobre a origem do nome do banco
-    if secret and secret.get("dbInstanceIdentifier") and db_config["database"] == secret.get("dbInstanceIdentifier") and not (secret.get("dbname") or secret.get("database")):
-        print("Aviso: usando 'dbInstanceIdentifier' do secret como nome do banco. Verifique se esse é o nome correto do banco dentro do PostgreSQL.")
-    # Se não houver nome do banco no secret ou em DB_NAME, a configuração ficará incompleta
-    # e `get_db_connection` levantará um erro. Evitamos assumir um fallback implícito.
-
-    source = "Secrets Manager" if secret else "variáveis de ambiente"
-    print(f"Usando configuração de banco de dados a partir de: {source}")
-    return db_config
-
+# Database configuration — prefer environment variables (loaded from .env in dev)
+DB_HOST = os.getenv('DB_HOST')
+DB_NAME = os.getenv('DB_NAME')
+DB_USER = os.getenv('DB_USER')
+DB_PASSWORD = os.getenv('DB_PASSWORD')
+DB_PORT = os.getenv('DB_PORT')
 
 def get_db_connection():
-    db_config = get_db_config()
-    missing = [key for key, value in db_config.items() if not value]
-    if missing:
-        raise RuntimeError(
-            "Configuração de banco de dados incompleta. Verifique Secrets Manager ou variáveis de ambiente: "
-            + ", ".join(missing)
-        )
-
-    port = int(db_config["port"]) if db_config["port"] else None
-    return psycopg2.connect(
-        host=db_config["host"],
-        port=port,
-        database=db_config["database"],
-        user=db_config["user"],
-        password=db_config["password"],
+    conn = psycopg2.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        database=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD
     )
-
-def check_db_connection():
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT 1")
-        cur.fetchone()
-        cur.close()
-        conn.close()
-        print("Conexão com o banco de dados: OK")
-    except Exception as e:
-        raise RuntimeError(f"Falha ao conectar no banco de dados: {e}")
+    return conn
 
 
 def init_db():
@@ -222,5 +148,4 @@ def update_flag(name):
     return jsonify({"message": f"Flag '{name}' atualizada"}), 200
 
 if __name__ == '__main__':
-    check_db_connection()
     app.run(host='0.0.0.0', port=5000)
