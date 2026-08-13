@@ -26,9 +26,8 @@ users:
   - name: togglemaster
     gecos: ToggleMaster Application User
     shell: /usr/sbin/nologin
-    system: true
-    create_home: false
     lock_passwd: true
+    groups: nogroup
 
 # ============================================================
 #  ENVIRONMENT VARIABLES — EDITE AQUI ANTES DE LAUNCHAR
@@ -153,6 +152,17 @@ write_files:
 runcmd:
   - |
     set -eu
+    echo "[0/6] Garantindo usuario togglemaster como usuario de sistema..."
+    if ! id togglemaster >/dev/null 2>&1; then
+      useradd -r -s /usr/sbin/nologin -M togglemaster
+    else
+      usermod -s /usr/sbin/nologin togglemaster || true
+    fi
+    # Garante que nao tem home valida (seguranca extra)
+    if grep -q '^togglemaster:' /etc/passwd; then
+      usermod -d /opt/togglemaster togglemaster 2>/dev/null || true
+    fi
+
     echo "[1/6] Atualizando pip global..."
     python3 -m pip install --upgrade pip || true
     APP_DIR=/opt/togglemaster
