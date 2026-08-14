@@ -224,8 +224,10 @@ runcmd:
       Environment="PATH=/home/ec2-user/togglemaster/venv/bin"
 
       # Comando responsável por iniciar a aplicação Flask
-      ExecStart=/home/ec2-user/togglemaster/venv/bin/python \
-          /home/ec2-user/togglemaster/app.py
+      ExecStart=/home/ec2-user/togglemaster/venv/bin/gunicorn \
+          --workers 2 \
+          --bind 0.0.0.0:5000 \
+          app:app
 
       # Reinicia automaticamente o processo caso ele falhe
       Restart=always
