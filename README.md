@@ -115,3 +115,295 @@ Se quiser, eu posso também:
 - Diagrama da arquitetura AWS (espaço reservado / placeholder): [aws-architecture.mmd](aws-architecture.mmd)
 
 Os arquivos acima estão em formato Mermaid (`.mmd`). Você pode abri-los diretamente em ferramentas que suportem Mermaid ou converter para SVG/PNG para inclusão em apresentações.
+
+## Automação de incialização com User Data da EC2
+
+# ToggleMaster - Inicialização Automática na EC2 com SystemD
+
+## Objetivo
+
+Automatizar a inicialização da aplicação ToggleMaster após qualquer reinicialização da instância EC2, eliminando a necessidade de acesso manual via SSH para executar a aplicação.
+
+Antes da automação, sempre que a instância era reiniciada era necessário:
+
+```bash
+cd /home/ec2-user/togglemaster
+source venv/bin/activate
+python app.py
+```
+
+Após a configuração, a aplicação é iniciada automaticamente durante o boot da EC2.
+
+---
+
+# Arquitetura
+
+```text
+Internet
+    │
+    ▼
+EC2 Amazon Linux
+    │
+    ▼
+SystemD
+    │
+    ▼
+Flask Application
+    │
+    ▼
+PostgreSQL RDS
+```
+
+---
+
+# Estrutura do Projeto
+
+```text
+/home/ec2-user/togglemaster
+│
+├── app.py
+├── .env
+├── requirements.txt
+└── venv/
+```
+
+Onde:
+
+| Arquivo | Descrição |
+|----------|------------|
+| app.py | Aplicação Flask |
+| .env | Credenciais do banco PostgreSQL |
+| venv | Ambiente virtual Python |
+| requirements.txt | Dependências do projeto |
+
+---
+
+# Solução Implementada
+
+A solução utiliza:
+
+- AWS EC2 User Data
+- Linux SystemD
+- Ambiente Virtual Python (venv)
+
+O User Data cria automaticamente um serviço SystemD responsável por iniciar a aplicação no boot da instância.
+
+---
+
+# User Data Utilizado
+
+```yaml
+#cloud-config
+
+runcmd:
+  - |
+      # Cria diretório para armazenamento dos logs da aplicação
+      mkdir -p /var/log/togglemaster
+
+      # Cria o serviço SystemD responsável pela aplicação
+      cat > /etc/systemd/system/togglemaster.service << 'EOF'
+      [Unit]
+      Description=ToggleMaster Flask Application
+
+      # Aguarda a inicialização da rede antes de subir a aplicação
+      After=network.target
+
+      [Service]
+
+      # Executa o processo utilizando o usuário padrão da EC2
+      User=ec2-user
+      Group=ec2-user
+
+      # Define o diretório de trabalho da aplicação
+      WorkingDirectory=/home/ec2-user/togglemaster
+
+      # Carrega automaticamente as variáveis do arquivo .env
+      EnvironmentFile=/home/ec2-user/togglemaster/.env
+
+      # Utiliza os binários instalados no ambiente virtual
+      Environment="PATH=/home/ec2-user/togglemaster/venv/bin"
+
+      # Comando responsável por iniciar a aplicação Flask
+      ExecStart=/home/ec2-user/togglemaster/venv/bin/python \
+          /home/ec2-user/togglemaster/app.py
+
+      # Reinicia automaticamente o processo caso ele falhe
+      Restart=always
+
+      # Aguarda 5 segundos antes de tentar reiniciar
+      RestartSec=5
+
+      # Direciona saída padrão para arquivo de log
+      StandardOutput=append:/var/log/togglemaster/app.log
+
+      # Direciona erros para o mesmo arquivo de log
+      StandardError=append:/var/log/togglemaster/app.log
+
+      [Install]
+
+      # Habilita o serviço para iniciar no boot da EC2
+      WantedBy=multi-user.target
+      EOF
+
+      # Recarrega as definições dos serviços do SystemD
+      systemctl daemon-reload
+
+      # Habilita a execução automática no boot
+      systemctl enable togglemaster
+
+      # Inicia o serviço imediatamente
+      systemctl restart togglemaster
+
+final_message: "ToggleMaster configurado com sucesso"
+```
+
+---
+
+# Explicação dos Comandos
+
+## Criar diretório de logs
+
+```bash
+mkdir -p /var/log/togglemaster
+```
+
+Cria o diretório que armazenará os logs da aplicação.
+
+A opção `-p` evita erro caso o diretório já exista.
+
+---
+
+## Criar o serviço SystemD
+
+```bash
+cat > /etc/systemd/system/togglemaster.service
+```
+
+Cria o arquivo de configuração do serviço responsável por iniciar a aplicação automaticamente.
+
+---
+
+## Definir dependência da rede
+
+```ini
+After=network.target
+```
+
+Garante que a aplicação só seja iniciada após a rede estar disponível.
+
+Importante para aplicações que dependem de:
+
+- PostgreSQL RDS
+- APIs externas
+- Serviços de autenticação
+
+---
+
+## Definir usuário de execução
+
+```ini
+User=ec2-user
+Group=ec2-user
+```
+
+Executa a aplicação sem privilégios administrativos.
+
+Boa prática de segurança.
+
+---
+
+## Definir diretório da aplicação
+
+```ini
+WorkingDirectory=/home/ec2-user/togglemaster
+```
+
+Equivale a executar:
+
+```bash
+cd /home/ec2-user/togglemaster
+```
+
+antes da inicialização.
+
+---
+
+## Carregar variáveis de ambiente
+
+```ini
+EnvironmentFile=/home/ec2-user/togglemaster/.env
+```
+
+Permite que o Flask acesse automaticamente:
+
+```env
+DB_HOST=
+DB_PORT=
+DB_NAME=
+DB_USER=
+DB_PASSWORD=
+```
+
+sem que essas informações fiquem expostas no código.
+
+---
+
+## Utilizar o ambiente virtual
+
+```ini
+Environment="PATH=/home/ec2-user/togglemaster/venv/bin"
+```
+
+Garante que o Python e todas as bibliotecas utilizadas sejam as versões instaladas dentro do projeto.
+
+---
+
+## Iniciar a aplicação
+
+```ini
+ExecStart=/home/ec2-user/togglemaster/venv/bin/python \
+          /home/ec2-user/togglemaster/app.py
+```
+
+Equivale aos comandos manuais:
+
+```bash
+cd /home/ec2-user/togglemaster
+
+source venv/bin/activate
+
+python app.py
+```
+
+---
+
+## Reinício automático em caso de falha
+
+```ini
+Restart=always
+```
+
+Caso a aplicação seja encerrada inesperadamente, o SystemD tenta reiniciá-la automaticamente.
+
+---
+
+## Intervalo entre tentativas
+
+```ini
+RestartSec=5
+```
+
+Define uma espera de 5 segundos antes de cada tentativa de reinício.
+
+---
+
+## Log da aplicação
+
+```ini
+StandardOutput=append:/var/log/togglemaster/app.log
+```
+
+Armazena mensagens normais da aplicação.
+
+```ini
+StandardError=append:/var/log/togglemaster/app.log
