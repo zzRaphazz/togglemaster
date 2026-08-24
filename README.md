@@ -109,12 +109,6 @@ Se quiser, eu posso também:
 
 ---
 
-## Diagramas de Arquitetura
-
-- Diagrama da aplicação (componentes e fluxo): [architecture.mmd](architecture.mmd)
-- Diagrama da arquitetura AWS (espaço reservado / placeholder): [aws-architecture.mmd](aws-architecture.mmd)
-
-Os arquivos acima estão em formato Mermaid (`.mmd`). Você pode abri-los diretamente em ferramentas que suportem Mermaid ou converter para SVG/PNG para inclusão em apresentações.
 
 ## Automação de incialização com User Data da EC2
 
@@ -186,7 +180,8 @@ A solução utiliza:
 - Linux SystemD
 - Ambiente Virtual Python (venv)
 
-O User Data cria automaticamente um serviço SystemD responsável por iniciar a aplicação no boot da instância.
+O User Data cria automaticamente um serviço SystemD responsável por iniciar a aplicação no boot da instância. 
+Isso permite que caso ocorra uma instabilidade na EC2, caso ocorra um shutdown a aplicação é reiniciada assim que EC2 estiver online novamente
 
 ---
 
