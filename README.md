@@ -394,13 +394,6 @@ Define uma espera de 5 segundos antes de cada tentativa de reinício.
 
 ---
 
-## Log da aplicação
+## Link de demonstração da aplicação
 
-```ini
-StandardOutput=append:/var/log/togglemaster/app.log
-```
-
-Armazena mensagens normais da aplicação.
-
-```ini
-StandardError=append:/var/log/togglemaster/app.log
+[Link do YouTube](https://youtu.be/Ir77o6vbix0?si=y0DvR3rB1HQ9QJX2)
